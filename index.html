@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Matrix Rain</title>
+
+<style>
+html,body{
+    margin:0;
+    width:100%;
+    height:100%;
+    overflow:hidden;
+    background:#000;
+}
+
+canvas{
+    display:block;
+    width:100vw;
+    height:100vh;
+}
+</style>
+</head>
+<body>
+
+<canvas id="matrix"></canvas>
+
+<script>
+const canvas = document.getElementById("matrix");
+const ctx = canvas.getContext("2d");
+
+const CHARS =
+"アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲンABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
+const FONT_SIZE = 13;
+
+let columns = [];
+
+function randomChar() {
+    return CHARS[Math.floor(Math.random() * CHARS.length)];
+}
+
+function resize() {
+
+    const dpr = window.devicePixelRatio || 1;
+
+    canvas.width = innerWidth * dpr;
+    canvas.height = innerHeight * dpr;
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    columns = [];
+
+    const count = Math.ceil(innerWidth / FONT_SIZE);
+
+    for (let i = 0; i < count; i++) {
+
+        const layer = Math.random();
+
+        let speed;
+        let brightness;
+
+        if (layer < 0.33) {
+            speed = 0.7 + Math.random() * 0.5;
+            brightness = 0.35;
+        }
+        else if (layer < 0.66) {
+            speed = 1.4 + Math.random() * 0.8;
+            brightness = 0.6;
+        }
+        else {
+            speed = 2.5 + Math.random() * 1.5;
+            brightness = 1;
+        }
+
+        const length =
+            12 +
+            Math.floor(Math.random() * 35);
+
+        columns.push({
+            x: i * FONT_SIZE,
+            y: Math.random() * -innerHeight * 2,
+            speed,
+            brightness,
+            drift: (Math.random() - 0.5) * 0.01,
+            length,
+            chars: Array.from(
+                { length: 60 },
+                randomChar
+            )
+        });
+    }
+}
+
+function draw() {
+
+    ctx.fillStyle = "#000";
+    ctx.fillRect(
+        0,
+        0,
+        innerWidth,
+        innerHeight
+    );
+
+    ctx.font =
+        `${FONT_SIZE}px monospace`;
+
+    for (const col of columns) {
+
+        for (
+            let i = 0;
+            i < col.length;
+            i++
+        ) {
+
+            const y =
+                col.y -
+                i * FONT_SIZE;
+
+            if (
+                y < -FONT_SIZE ||
+                y > innerHeight + FONT_SIZE
+            ) continue;
+
+            if (Math.random() < 0.0015) {
+                col.chars[i] =
+                    randomChar();
+            }
+
+            const fade =
+                Math.pow(
+                    1 - i / col.length,
+                    2.2
+                );
+
+            if (i === 0) {
+
+                ctx.globalAlpha = 1;
+                ctx.fillStyle =
+                    "#d8ffe5";
+
+            } else {
+
+                ctx.globalAlpha =
+                    fade *
+                    col.brightness;
+
+                ctx.fillStyle =
+                    "#00ff66";
+            }
+
+            ctx.fillText(
+                col.chars[i],
+                col.x,
+                y
+            );
+        }
+
+        col.speed += col.drift;
+
+        if (col.speed > 4)
+            col.drift = -Math.abs(col.drift);
+
+        if (col.speed < 0.5)
+            col.drift = Math.abs(col.drift);
+
+        col.y += col.speed;
+
+        if (
+            col.y -
+            col.length * FONT_SIZE >
+            innerHeight + 100
+        ) {
+
+            col.y =
+                -Math.random() * 1000;
+
+            col.length =
+                12 +
+                Math.floor(
+                    Math.random() * 35
+                );
+
+            const layer =
+                Math.random();
+
+            if (layer < 0.33) {
+                col.speed =
+                    0.7 +
+                    Math.random() * 0.5;
+                col.brightness = 0.35;
+            }
+            else if (layer < 0.66) {
+                col.speed =
+                    1.4 +
+                    Math.random() * 0.8;
+                col.brightness = 0.6;
+            }
+            else {
+                col.speed =
+                    2.5 +
+                    Math.random() * 1.5;
+                col.brightness = 1;
+            }
+        }
+    }
+
+    ctx.globalAlpha = 1;
+
+    requestAnimationFrame(draw);
+}
+
+resize();
+draw();
+
+window.addEventListener(
+    "resize",
+    resize
+);
+</script>
+
+</body>
+</html>
