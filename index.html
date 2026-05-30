@@ -3,221 +3,281 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Matrix Rain</title>
-
+<title>THE MATRIX</title>
 <style>
-html,body{
-    margin:0;
-    width:100%;
-    height:100%;
-    overflow:hidden;
-    background:#000;
-}
-
-canvas{
-    display:block;
-    width:100vw;
-    height:100vh;
-}
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    background: #000;
+    overflow: hidden;
+  }
+  canvas {
+    position: absolute; top: 0; left: 0;
+    display: block;
+  }
+  /* Glow layer — blurred bright-head copy, screen-blended */
+  #cvGlow {
+    filter: blur(8px) brightness(1.6);
+    opacity: 0.55;
+    mix-blend-mode: screen;
+    z-index: 2;
+    pointer-events: none;
+  }
+  #cvMain { z-index: 1; }
 </style>
 </head>
 <body>
-
-<canvas id="matrix"></canvas>
+<canvas id="cvMain"></canvas>
+<canvas id="cvGlow"></canvas>
 
 <script>
-const canvas = document.getElementById("matrix");
-const ctx = canvas.getContext("2d");
+'use strict';
+/*
+  MOVIE-ACCURATE MATRIX DIGITAL RAIN
+  ──────────────────────────────────
+  Sources / research:
+  • Wikipedia: Digital rain — half-width katakana + Latin + numerals
+    Characters are MIRRORED half-width katakana (ｦｧｨｩｪｫｬｭｮｯｰｱ...ﾝ)
+  • Rezmason/matrix analysis: multiple drops per column, no collisions,
+    sawtooth timing, bloom+tonemap color model
+  • Original film: bright white-green head, vivid green body, deep fading tail,
+    characters swap/flicker randomly, columns vary speed & length
+*/
 
-const CHARS =
-"アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲンABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+// ── Glyph pool ─────────────────────────────────────────────────
+// Half-width Katakana (U+FF66–FF9F) — the authentic movie characters
+const HW_KATA = [];
+for (let c = 0xFF66; c <= 0xFF9F; c++) HW_KATA.push(String.fromCharCode(c));
 
-const FONT_SIZE = 13;
+const LATIN = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+const DIGITS = '0123456789'.split('');
+const GLYPHS = [...HW_KATA, ...LATIN, ...DIGITS];
+const GL = GLYPHS.length;
 
-let columns = [];
+function rg() { return GLYPHS[(Math.random() * GL) | 0]; }
 
-function randomChar() {
-    return CHARS[Math.floor(Math.random() * CHARS.length)];
-}
+// ── Canvas setup ───────────────────────────────────────────────
+const cvMain = document.getElementById('cvMain');
+const cvGlow = document.getElementById('cvGlow');
+const mCtx   = cvMain.getContext('2d', { alpha: false });
+const gCtx   = cvGlow.getContext('2d');
+
+const CELL   = 16;   // px per grid cell (column width = font size)
+const FONT   = `bold ${CELL}px "MS Gothic","MS PGothic","Noto Sans JP","Courier New",monospace`;
+
+let W, H, COLS, ROWS;
 
 function resize() {
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  W = window.innerWidth;
+  H = window.innerHeight;
+  COLS = Math.ceil(W / CELL);
+  ROWS = Math.ceil(H / CELL) + 2;
 
-    const dpr = window.devicePixelRatio || 1;
+  for (const cv of [cvMain, cvGlow]) {
+    cv.width  = (W * dpr) | 0;
+    cv.height = (H * dpr) | 0;
+    cv.style.width  = W + 'px';
+    cv.style.height = H + 'px';
+  }
+  mCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  gCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  mCtx.font = FONT;
+  gCtx.font = FONT;
+  mCtx.textAlign = 'center';
+  gCtx.textAlign = 'center';
 
-    canvas.width = innerWidth * dpr;
-    canvas.height = innerHeight * dpr;
+  mCtx.fillStyle = '#000';
+  mCtx.fillRect(0, 0, W, H);
 
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-    columns = [];
-
-    const count = Math.ceil(innerWidth / FONT_SIZE);
-
-    for (let i = 0; i < count; i++) {
-
-        const layer = Math.random();
-
-        let speed;
-        let brightness;
-
-        if (layer < 0.33) {
-            speed = 0.7 + Math.random() * 0.5;
-            brightness = 0.35;
-        }
-        else if (layer < 0.66) {
-            speed = 1.4 + Math.random() * 0.8;
-            brightness = 0.6;
-        }
-        else {
-            speed = 2.5 + Math.random() * 1.5;
-            brightness = 1;
-        }
-
-        const length =
-            12 +
-            Math.floor(Math.random() * 35);
-
-        columns.push({
-            x: i * FONT_SIZE,
-            y: Math.random() * -innerHeight * 2,
-            speed,
-            brightness,
-            drift: (Math.random() - 0.5) * 0.01,
-            length,
-            chars: Array.from(
-                { length: 60 },
-                randomChar
-            )
-        });
-    }
+  initColumns();
 }
 
-function draw() {
+// ── Drop class ─────────────────────────────────────────────────
+// Each "drop" is an independent falling streak in a column.
+// Multiple drops can coexist in one column (like the film).
+class Drop {
+  constructor(col, startRow) {
+    this.col  = col;
+    this.cx   = col * CELL + CELL / 2;   // pixel center-x
 
-    ctx.fillStyle = "#000";
-    ctx.fillRect(
-        0,
-        0,
-        innerWidth,
-        innerHeight
-    );
+    // Random length (short fast ones + long slow ones both in film)
+    this.len  = (8 + Math.random() * 30) | 0;
 
-    ctx.font =
-        `${FONT_SIZE}px monospace`;
+    // Speed in rows-per-frame (delta-time adjusted)
+    this.spd  = 0.12 + Math.random() * 0.28;
 
-    for (const col of columns) {
+    // Brightness tier — affects green saturation
+    this.bri  = 0.5 + Math.random() * 0.5;
 
-        for (
-            let i = 0;
-            i < col.length;
-            i++
-        ) {
+    // Head position in fractional rows
+    this.y    = startRow !== undefined
+      ? startRow
+      : -(1 + Math.random() * ROWS * 1.5);
 
-            const y =
-                col.y -
-                i * FONT_SIZE;
+    // Glyph buffer for this streak
+    this.buf  = Array.from({ length: this.len + 2 }, rg);
 
-            if (
-                y < -FONT_SIZE ||
-                y > innerHeight + FONT_SIZE
-            ) continue;
+    // Mutation rate: how often chars flicker
+    this.mrate = 0.02 + Math.random() * 0.06;
 
-            if (Math.random() < 0.0015) {
-                col.chars[i] =
-                    randomChar();
-            }
+    // Flag: done = off-screen, can be recycled
+    this.done = false;
+  }
 
-            const fade =
-                Math.pow(
-                    1 - i / col.length,
-                    2.2
-                );
+  update(dt) {
+    this.y += this.spd * dt;
 
-            if (i === 0) {
-
-                ctx.globalAlpha = 1;
-                ctx.fillStyle =
-                    "#d8ffe5";
-
-            } else {
-
-                ctx.globalAlpha =
-                    fade *
-                    col.brightness;
-
-                ctx.fillStyle =
-                    "#00ff66";
-            }
-
-            ctx.fillText(
-                col.chars[i],
-                col.x,
-                y
-            );
-        }
-
-        col.speed += col.drift;
-
-        if (col.speed > 4)
-            col.drift = -Math.abs(col.drift);
-
-        if (col.speed < 0.5)
-            col.drift = Math.abs(col.drift);
-
-        col.y += col.speed;
-
-        if (
-            col.y -
-            col.length * FONT_SIZE >
-            innerHeight + 100
-        ) {
-
-            col.y =
-                -Math.random() * 1000;
-
-            col.length =
-                12 +
-                Math.floor(
-                    Math.random() * 35
-                );
-
-            const layer =
-                Math.random();
-
-            if (layer < 0.33) {
-                col.speed =
-                    0.7 +
-                    Math.random() * 0.5;
-                col.brightness = 0.35;
-            }
-            else if (layer < 0.66) {
-                col.speed =
-                    1.4 +
-                    Math.random() * 0.8;
-                col.brightness = 0.6;
-            }
-            else {
-                col.speed =
-                    2.5 +
-                    Math.random() * 1.5;
-                col.brightness = 1;
-            }
-        }
+    // Random glyph mutations (only near head — rest are stable)
+    for (let i = 0; i < Math.min(4, this.len); i++) {
+      if (Math.random() < this.mrate) this.buf[i] = rg();
+    }
+    // Occasional swap anywhere in streak
+    if (Math.random() < 0.004) {
+      const idx = (Math.random() * this.len) | 0;
+      this.buf[idx] = rg();
     }
 
-    ctx.globalAlpha = 1;
+    if (this.y - this.len > ROWS + 4) this.done = true;
+  }
 
-    requestAnimationFrame(draw);
+  draw(main, glow) {
+    const headRow = this.y | 0;
+
+    for (let i = 0; i < this.len; i++) {
+      const row = headRow - i;
+      if (row < -1 || row > ROWS + 1) continue;
+
+      const py = row * CELL;
+      const ch = this.buf[i % this.buf.length];
+      const t  = i / (this.len - 1 || 1);   // 0=head → 1=tail
+
+      let r, g, b, a;
+
+      if (i === 0) {
+        // HEAD — near-white with green tint (exactly like film)
+        r = 180; g = 255; b = 200;
+        a = 1.0;
+        // Draw on glow layer for bloom
+        gCtx.globalAlpha = 1.0;
+        gCtx.fillStyle = `rgb(${r},${g},${b})`;
+        gCtx.fillText(ch, this.cx, py);
+      } else if (i === 1) {
+        r = 100; g = 255; b = 120;
+        a = 0.95 * this.bri;
+        gCtx.globalAlpha = a * 0.7;
+        gCtx.fillStyle = `rgb(${r},${g},${b})`;
+        gCtx.fillText(ch, this.cx, py);
+      } else if (i <= 4) {
+        // BRIGHT ZONE — vivid #00FF41 style
+        const f = 1 - (i - 1) / 4;
+        r = 0;
+        g = (200 + 55 * f) | 0;
+        b = (50 * f) | 0;
+        a = this.bri * (0.6 + 0.35 * f);
+        gCtx.globalAlpha = a * 0.5;
+        gCtx.fillStyle = `rgb(${r},${g},${b})`;
+        gCtx.fillText(ch, this.cx, py);
+      } else {
+        // TRAILING FADE — quadratic decay to dark forest green
+        const fade = Math.pow(1 - t, 1.8);
+        r = 0;
+        g = (140 * fade * this.bri) | 0;
+        b = (20 * fade) | 0;
+        a = fade * this.bri * 0.85;
+      }
+
+      // Always draw on main
+      mCtx.globalAlpha = Math.max(0, Math.min(1, a));
+      mCtx.fillStyle   = `rgb(${r},${g},${b})`;
+      mCtx.fillText(ch, this.cx, py);
+    }
+
+    mCtx.globalAlpha = 1;
+    gCtx.globalAlpha = 1;
+  }
 }
 
+// ── Column manager ─────────────────────────────────────────────
+// Each column maintains a list of simultaneous drops.
+// New drops spawn after a column-specific cooldown.
+class Column {
+  constructor(idx) {
+    this.idx    = idx;
+    this.drops  = [];
+    this.cd     = (Math.random() * 80) | 0;  // initial random offset
+  }
+
+  tick(dt) {
+    // Spawn new drop when cooldown expires
+    this.cd -= dt;
+    if (this.cd <= 0) {
+      this.drops.push(new Drop(this.idx));
+      // Pause between drops: short gaps = dense rain, long = sparse
+      this.cd = 20 + Math.random() * 120;
+    }
+
+    for (const d of this.drops) d.update(dt);
+
+    // Remove finished drops
+    this.drops = this.drops.filter(d => !d.done);
+  }
+
+  draw() {
+    for (const d of this.drops) d.draw();
+  }
+}
+
+// ── State ──────────────────────────────────────────────────────
+let columns = [];
+
+function initColumns() {
+  columns = Array.from({ length: COLS }, (_, i) => {
+    const col = new Column(i);
+    // Scatter initial drops across screen so it's not empty on load
+    const count = (1 + Math.random() * 3) | 0;
+    for (let k = 0; k < count; k++) {
+      col.drops.push(new Drop(i, -ROWS * Math.random() + ROWS * 0.5));
+    }
+    return col;
+  });
+}
+
+// ── Render loop ────────────────────────────────────────────────
+let tLast = 0;
+
+function frame(now) {
+  const dt = Math.min((now - tLast) / 16.667, 4);
+  tLast = now;
+
+  // Phosphor persistence: partial alpha fade per frame
+  // 0.048 alpha ≈ correct decay at 60fps to match film feel
+  const fadeAlpha = 1 - Math.pow(0.952, dt);
+  mCtx.fillStyle = `rgba(0,0,0,${fadeAlpha.toFixed(5)})`;
+  mCtx.fillRect(0, 0, W, H);
+
+  // Glow canvas: clear each frame (only heads live here)
+  gCtx.clearRect(0, 0, W, H);
+
+  // Ensure font is set (reset after ctx transforms)
+  mCtx.font = FONT;
+  gCtx.font = FONT;
+  mCtx.textAlign = 'center';
+  gCtx.textAlign = 'center';
+
+  for (const col of columns) {
+    col.tick(dt);
+    col.draw();
+  }
+
+  requestAnimationFrame(frame);
+}
+
+// ── Boot ───────────────────────────────────────────────────────
 resize();
-draw();
-
-window.addEventListener(
-    "resize",
-    resize
-);
+let _rt;
+window.addEventListener('resize', () => { clearTimeout(_rt); _rt = setTimeout(resize, 120); });
+requestAnimationFrame(t => { tLast = t; requestAnimationFrame(frame); });
 </script>
-
 </body>
 </html>
